@@ -320,7 +320,7 @@ def main():
                 # Get existing data for this day
                 day_existing = existing_data[existing_data["day"] == day] if not existing_data.empty else pd.DataFrame()
                 
-                cols = st.columns([1, 1, 1.5] + [1, 1] * 10)
+                cols = st.columns([1, 1, 1.5] + [1, 1] * 4)
                 
                 # Day and date
                 cols[0].write(f"{day_name[:3]}")
@@ -338,9 +338,9 @@ def main():
                     label_visibility="collapsed"
                 )
                 
-                # Projects and hours (up to 10)
+                # Projects and hours (up to 4)
                 day_entries = []
-                for i in range(10):
+                for i in range(4):
                     project_col = cols[3 + i*2]
                     hours_col = cols[4 + i*2]
                     
