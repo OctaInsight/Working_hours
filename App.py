@@ -293,12 +293,12 @@ def main():
         # Button to add more project columns
         col1, col2, col3 = st.columns([2, 2, 6])
         with col1:
-            if st.button("➕ Add 2 More Projects", disabled=st.session_state.num_project_columns >= 10):
-                st.session_state.num_project_columns = min(10, st.session_state.num_project_columns + 2)
+            if st.button("➕ Add 1 More Projects", disabled=st.session_state.num_project_columns >= 10):
+                st.session_state.num_project_columns = min(10, st.session_state.num_project_columns + 1)
                 st.rerun()
         with col2:
-            if st.button("➖ Remove 2 Projects", disabled=st.session_state.num_project_columns <= 2):
-                st.session_state.num_project_columns = max(2, st.session_state.num_project_columns - 2)
+            if st.button("➖ Remove 1 Projects", disabled=st.session_state.num_project_columns <= 2):
+                st.session_state.num_project_columns = max(2, st.session_state.num_project_columns - 1)
                 st.rerun()
         
         st.info(f"Currently showing {st.session_state.num_project_columns} project columns")
