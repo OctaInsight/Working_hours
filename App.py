@@ -74,6 +74,8 @@ if "current_month" not in st.session_state:
     st.session_state.current_month = datetime.now().month
 if "current_year" not in st.session_state:
     st.session_state.current_year = datetime.now().year
+if "num_project_columns" not in st.session_state:
+    st.session_state.num_project_columns = 2  # Start with 2 projects
 
 # -------------------------------------------------------------
 # User credentials (read from secrets)
@@ -288,6 +290,19 @@ def main():
     if page == "📝 Enter Hours":
         st.header(f"📝 Enter Working Hours - {calendar.month_name[selected_month]} {selected_year}")
         
+        # Button to add more project columns
+        col1, col2, col3 = st.columns([2, 2, 6])
+        with col1:
+            if st.button("➕ Add 2 More Projects", disabled=st.session_state.num_project_columns >= 10):
+                st.session_state.num_project_columns = min(10, st.session_state.num_project_columns + 2)
+                st.rerun()
+        with col2:
+            if st.button("➖ Remove 2 Projects", disabled=st.session_state.num_project_columns <= 2):
+                st.session_state.num_project_columns = max(2, st.session_state.num_project_columns - 2)
+                st.rerun()
+        
+        st.info(f"Currently showing {st.session_state.num_project_columns} project columns")
+        
         days_data = get_days_in_month(selected_year, selected_month)
         existing_data = load_working_hours(
             st.session_state.authenticated_user,
@@ -299,15 +314,26 @@ def main():
         with st.form("hours_entry_form"):
             st.subheader("Daily Hours Entry")
             
+            # Calculate column widths dynamically
+            num_projects = st.session_state.num_project_columns
+            base_cols = [1, 1]  # Day and Date
+            project_cols = [2, 1.2] * num_projects  # Project (wider) and Hours for each
+            comment_col = [2.5]  # Comments
+            
+            all_col_widths = base_cols + project_cols + comment_col
+            
             # Create table headers
-            cols = st.columns([1, 1, 1.5] + [1, 1] * 10)
+            cols = st.columns(all_col_widths)
             cols[0].markdown("**Day**")
             cols[1].markdown("**Date**")
-            cols[2].markdown("**Comments**")
             
-            for i in range(10):
-                cols[3 + i*2].markdown(f"**Project {i+1}**")
-                cols[4 + i*2].markdown(f"**Hours {i+1}**")
+            # Dynamic project headers
+            for i in range(num_projects):
+                cols[2 + i*2].markdown(f"**Project {i+1}**")
+                cols[3 + i*2].markdown(f"**Hours {i+1}**")
+            
+            # Comments header at the end
+            cols[2 + num_projects*2].markdown("**Comments**")
             
             # Store form data
             form_data = []
@@ -320,16 +346,16 @@ def main():
                 # Get existing data for this day
                 day_existing = existing_data[existing_data["day"] == day] if not existing_data.empty else pd.DataFrame()
                 
-                # Create wider columns for better visibility
-                cols = st.columns([0.7, 0.7, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 2])
+                # Create columns for this row
+                cols = st.columns(all_col_widths)
                 
                 # Day and date
                 cols[0].write(f"{day_name[:3]}")
                 cols[1].write(f"{day}")
                 
-                # Projects and hours (4 projects)
+                # Projects and hours (dynamic number)
                 day_entries = []
-                for i in range(4):
+                for i in range(num_projects):
                     project_col = cols[2 + i*2]
                     hours_col = cols[3 + i*2]
                     
@@ -367,12 +393,12 @@ def main():
                             "comments": ""  # Will be set below
                         })
                 
-                # Comments at the end (right side)
+                # Comments at the end (rightmost column)
                 existing_comments = ""
                 if not day_existing.empty:
                     existing_comments = day_existing.iloc[0].get("comments", "")
                 
-                comments = cols[10].text_input(
+                comments = cols[2 + num_projects*2].text_input(
                     "Comments",
                     value=existing_comments,
                     key=f"comments_{day}",
