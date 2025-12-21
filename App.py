@@ -320,29 +320,18 @@ def main():
                 # Get existing data for this day
                 day_existing = existing_data[existing_data["day"] == day] if not existing_data.empty else pd.DataFrame()
                 
-                cols = st.columns([1, 1, 1.5] + [1, 1] * 4)
+                # Create wider columns for better visibility
+                cols = st.columns([0.7, 0.7, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 2])
                 
                 # Day and date
                 cols[0].write(f"{day_name[:3]}")
                 cols[1].write(f"{day}")
                 
-                # Comments
-                existing_comments = ""
-                if not day_existing.empty:
-                    existing_comments = day_existing.iloc[0].get("comments", "")
-                
-                comments = cols[2].text_input(
-                    "Comments",
-                    value=existing_comments,
-                    key=f"comments_{day}",
-                    label_visibility="collapsed"
-                )
-                
-                # Projects and hours (up to 4)
+                # Projects and hours (4 projects)
                 day_entries = []
                 for i in range(4):
-                    project_col = cols[3 + i*2]
-                    hours_col = cols[4 + i*2]
+                    project_col = cols[2 + i*2]
+                    hours_col = cols[3 + i*2]
                     
                     # Get existing data for this project slot
                     existing_project = ""
@@ -375,8 +364,24 @@ def main():
                             "day": day,
                             "project": project,
                             "hours": hours,
-                            "comments": comments
+                            "comments": ""  # Will be set below
                         })
+                
+                # Comments at the end (right side)
+                existing_comments = ""
+                if not day_existing.empty:
+                    existing_comments = day_existing.iloc[0].get("comments", "")
+                
+                comments = cols[10].text_input(
+                    "Comments",
+                    value=existing_comments,
+                    key=f"comments_{day}",
+                    label_visibility="collapsed"
+                )
+                
+                # Update comments for all day entries
+                for entry in day_entries:
+                    entry["comments"] = comments
                 
                 form_data.extend(day_entries)
             
