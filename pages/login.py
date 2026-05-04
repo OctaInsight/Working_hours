@@ -31,7 +31,7 @@ st.markdown(f"""
         Octa Platform
     </h1>
     <p style="color:{DARK['muted']};font-size:0.95rem;margin:0">
-        Proposal tracking &amp; partner management
+        Working hours tracking system
     </p>
 </div>
 """, unsafe_allow_html=True)
