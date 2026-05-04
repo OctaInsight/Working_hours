@@ -223,9 +223,7 @@ with tab_stats:
         pivot = df.groupby(["employee","display_label"])["hours_worked"] \
                   .sum().unstack(fill_value=0).round(2)
         if not pivot.empty:
-            st.dataframe(pivot.style.background_gradient(
-                cmap="Blues", axis=None
-            ), use_container_width=True)
+            st.dataframe(pivot, use_container_width=True)
 
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Team Overview table
