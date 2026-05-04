@@ -15,6 +15,17 @@ def db() -> Client:
     return _client()
 
 
+# ── Partners (read-only, shared table) ───────────────────────────────────────
+
+def get_all_partners() -> list:
+    """Return all partners ordered by name — used for organisation dropdown."""
+    try:
+        resp = db().table("partners").select("full_name").order("full_name").execute()
+        return resp.data or []
+    except Exception:
+        return []
+
+
 # ── Proposals (read-only, from shared table) ──────────────────────────────────
 
 def get_proposal_acronyms() -> list:
