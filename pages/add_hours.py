@@ -72,143 +72,140 @@ with tab_add:
     def _v(field, default=None):
         return edit_row.get(field, default) if edit_row else default
 
-    with st.form("log_form", clear_on_submit=False):
+    # ── No st.form — widgets update live so hours preview recalculates ────────
 
-        section_label("📅 Date & Reference")
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            log_date = st.date_input(
-                "Date *",
-                value=datetime.strptime(_v("log_date", date.today().isoformat())[:10],
-                                         "%Y-%m-%d").date(),
-                format="YYYY-MM-DD"
-            )
-        with fc2:
-            entry_type = st.radio(
-                "Log type *",
-                ["proposal", "project"],
-                index=0 if _v("entry_type","proposal") == "proposal" else 1,
-                horizontal=True,
-            )
+    section_label("📅 Date & Reference")
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        log_date = st.date_input(
+            "Date *",
+            value=datetime.strptime(_v("log_date", date.today().isoformat())[:10],
+                                     "%Y-%m-%d").date(),
+            format="YYYY-MM-DD",
+            key="log_date_input"
+        )
+    with fc2:
+        entry_type = st.radio(
+            "Log type *",
+            ["proposal", "project"],
+            index=0 if _v("entry_type","proposal") == "proposal" else 1,
+            horizontal=True,
+            key="entry_type_radio"
+        )
 
-        # Proposal or project selector
-        section_label("🔗 Proposal / Project")
-        if entry_type == "proposal":
-            prop_opts = _proposal_options()
-            if not prop_opts:
-                st.warning("No proposals found in the database.")
-                ref_id = ""
-            else:
-                # Pre-select current value if editing
-                current_pid = _v("proposal_id", "")
-                default_idx = 0
-                keys = list(prop_opts.keys())
-                for i, (label, pid) in enumerate(prop_opts.items()):
-                    if pid == current_pid:
-                        default_idx = i
-                        break
-                selected = st.selectbox("Select Proposal *", keys,
-                                         index=default_idx)
-                ref_id = prop_opts[selected]
+    section_label("🔗 Proposal / Project")
+    if entry_type == "proposal":
+        prop_opts = _proposal_options()
+        if not prop_opts:
+            st.warning("No proposals found in the database.")
+            ref_id = ""
         else:
-            proj_opts = _project_options()
-            if not proj_opts:
-                st.info("No projects in the database yet. Projects will be added later.")
-                ref_id = ""
-            else:
-                current_prid = _v("project_id", "")
-                default_idx  = 0
-                keys         = list(proj_opts.keys())
-                for i, (label, pid) in enumerate(proj_opts.items()):
-                    if pid == current_prid:
-                        default_idx = i
-                        break
-                selected = st.selectbox("Select Project *", keys, index=default_idx)
-                ref_id   = proj_opts[selected]
+            current_pid = _v("proposal_id", "")
+            keys        = list(prop_opts.keys())
+            default_idx = next((i for i,(l,p) in enumerate(prop_opts.items())
+                                if p == current_pid), 0)
+            selected = st.selectbox("Select Proposal *", keys,
+                                     index=default_idx, key="sel_proposal")
+            ref_id = prop_opts[selected]
+    else:
+        proj_opts = _project_options()
+        if not proj_opts:
+            st.info("No projects in the database yet. Projects will be added later.")
+            ref_id = ""
+        else:
+            current_prid = _v("project_id", "")
+            keys         = list(proj_opts.keys())
+            default_idx  = next((i for i,(l,p) in enumerate(proj_opts.items())
+                                 if p == current_prid), 0)
+            selected = st.selectbox("Select Project *", keys,
+                                     index=default_idx, key="sel_project")
+            ref_id = proj_opts[selected]
 
-        section_label("⏰ Working Hours")
+    section_label("⏰ Working Hours")
+    HOURS   = [f"{h:02d}" for h in range(0, 24)]
+    MINUTES = ["00", "15", "30", "45"]
 
-        # Use selectboxes — st.time_input causes React errors in some Streamlit versions
-        HOURS   = [f"{h:02d}" for h in range(0, 24)]
-        MINUTES = ["00", "15", "30", "45"]
+    def _parse_hm(v, default_h, default_m):
+        try:
+            parts = str(v)[:5].split(":")
+            h     = f"{int(parts[0]):02d}"
+            m_raw = int(parts[1])
+            m     = f"{(m_raw // 15) * 15:02d}"
+            return h, m
+        except Exception:
+            return f"{default_h:02d}", f"{default_m:02d}"
 
-        def _parse_hm(v, default_h, default_m):
-            """Extract (hour_str, minute_str) from a stored time string."""
-            try:
-                parts = str(v)[:5].split(":")
-                h = f"{int(parts[0]):02d}"
-                m_raw = int(parts[1])
-                # Round to nearest 15
-                m = f"{(m_raw // 15) * 15:02d}"
-                return h, m
-            except Exception:
-                return f"{default_h:02d}", f"{default_m:02d}"
+    s_h, s_m = _parse_hm(_v("start_time"), 9,  0)
+    e_h, e_m = _parse_hm(_v("end_time"),  17,  0)
 
-        s_h, s_m = _parse_hm(_v("start_time"), 9,  0)
-        e_h, e_m = _parse_hm(_v("end_time"),   17, 0)
+    tc1, tc2, tc3 = st.columns(3)
+    with tc1:
+        st.markdown("**Start time \\***")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            sh = st.selectbox("Hour", HOURS,
+                              index=HOURS.index(s_h),
+                              key="start_h", label_visibility="collapsed")
+        with sc2:
+            sm = st.selectbox("Min", MINUTES,
+                              index=MINUTES.index(s_m) if s_m in MINUTES else 0,
+                              key="start_m", label_visibility="collapsed")
+        start_time = time(int(sh), int(sm))
 
-        tc1, tc2, tc3 = st.columns(3)
-        with tc1:
-            st.markdown("**Start time \\***")
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                sh = st.selectbox("Hour",   HOURS,   index=HOURS.index(s_h),
-                                  key="start_h", label_visibility="collapsed")
-            with sc2:
-                sm = st.selectbox("Min",    MINUTES, index=MINUTES.index(s_m) if s_m in MINUTES else 0,
-                                  key="start_m", label_visibility="collapsed")
-            start_time = time(int(sh), int(sm))
+    with tc2:
+        st.markdown("**End time \\***")
+        ec1, ec2 = st.columns(2)
+        with ec1:
+            eh = st.selectbox("Hour", HOURS,
+                              index=HOURS.index(e_h),
+                              key="end_h", label_visibility="collapsed")
+        with ec2:
+            em = st.selectbox("Min", MINUTES,
+                              index=MINUTES.index(e_m) if e_m in MINUTES else 0,
+                              key="end_m", label_visibility="collapsed")
+        end_time = time(int(eh), int(em))
 
-        with tc2:
-            st.markdown("**End time \\***")
-            ec1, ec2 = st.columns(2)
-            with ec1:
-                eh = st.selectbox("Hour",   HOURS,   index=HOURS.index(e_h),
-                                  key="end_h", label_visibility="collapsed")
-            with ec2:
-                em = st.selectbox("Min",    MINUTES, index=MINUTES.index(e_m) if e_m in MINUTES else 0,
-                                  key="end_m", label_visibility="collapsed")
-            end_time = time(int(eh), int(em))
+    with tc3:
+        # Live calculation — updates on every selectbox change
+        st.markdown("**Hours worked**")
+        if end_time > start_time:
+            mins   = (end_time.hour*60 + end_time.minute) - \
+                     (start_time.hour*60 + start_time.minute)
+            hrs    = mins / 60
+            accent = DARK["accent"]
+            muted  = DARK["muted"]
+            bg2    = DARK["bg2"]
+            st.markdown(
+                f"<div style='background:{bg2};border:1px solid {accent}44;"
+                f"border-radius:8px;padding:0.7rem;text-align:center'>"
+                f"<div style='color:{muted};font-size:0.72rem'>TOTAL</div>"
+                f"<div style='color:{accent};font-size:1.8rem;font-weight:700'>"
+                f"{hrs:.2f}h</div></div>",
+                unsafe_allow_html=True
+            )
+        else:
+            danger = DARK["danger"]
+            st.markdown(
+                f"<div style='color:{danger};font-size:0.85rem'>"
+                f"⚠️ End must be after start</div>",
+                unsafe_allow_html=True
+            )
 
-        with tc3:
-            # Live hours preview
-            st.markdown("**Hours worked**")
-            if end_time > start_time:
-                mins = (end_time.hour*60 + end_time.minute) - \
-                       (start_time.hour*60 + start_time.minute)
-                hrs  = mins / 60
-                accent = DARK["accent"]
-                muted  = DARK["muted"]
-                bg2    = DARK["bg2"]
-                st.markdown(
-                    f"<div style='background:{bg2};border:1px solid {accent}44;"
-                    f"border-radius:8px;padding:0.7rem;text-align:center'>"
-                    f"<div style='color:{muted};font-size:0.72rem'>TOTAL</div>"
-                    f"<div style='color:{accent};font-size:1.8rem;font-weight:700'>"
-                    f"{hrs:.2f}h</div></div>",
-                    unsafe_allow_html=True
-                )
-            else:
-                danger = DARK["danger"]
-                st.markdown(
-                    f"<div style='color:{danger};font-size:0.85rem'>"
-                    f"⚠️ End must be after start</div>",
-                    unsafe_allow_html=True
-                )
+    section_label("💬 Comment")
+    comment = st.text_area(
+        "What did you work on?",
+        value=_v("comment", ""),
+        height=100,
+        placeholder="Brief description of the work done today…",
+        key="comment_input"
+    )
 
-        section_label("💬 Comment")
-        comment = st.text_area(
-            "What did you work on?",
-            value=_v("comment", ""),
-            height=100,
-            placeholder="Brief description of the work done today…"
-        )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        submitted = st.form_submit_button(
-            "💾 Save Entry" if edit_row else "➕ Add Entry",
-            type="primary", use_container_width=True
-        )
+    st.markdown("<br>", unsafe_allow_html=True)
+    submitted = st.button(
+        "💾 Save Entry" if edit_row else "➕ Add Entry",
+        type="primary", use_container_width=True,
+        key="submit_log"
+    )
 
     if submitted:
         if not ref_id:
