@@ -237,9 +237,9 @@ def sidebar_nav():
                     f"text-transform:uppercase;color:{DARK['muted']};margin-bottom:0.3rem'>"
                     f"Navigation</div>", unsafe_allow_html=True)
 
-        st.page_link("app.py",                label="🏠  Home")
-        st.page_link("pages/dashboard.py",    label="📊  Overall Working Hours")
-        st.page_link("pages/add_hours.py",    label="➕  Add Working Hours")
+        if st.button("🏠  Home",                  key="nav_home",  use_container_width=True): st.switch_page("app.py")
+        if st.button("📊  Overall Working Hours", key="nav_dash",  use_container_width=True): st.switch_page("pages/dashboard.py")
+        if st.button("➕  Add Working Hours",     key="nav_add",   use_container_width=True): st.switch_page("pages/add_hours.py")
 
         # Admin
         if is_admin_user:
@@ -248,7 +248,7 @@ def sidebar_nav():
             st.markdown(f"<div style='font-size:0.68rem;font-weight:600;letter-spacing:0.1em;"
                         f"text-transform:uppercase;color:{DARK['muted']};margin-bottom:0.3rem'>"
                         f"Administration</div>", unsafe_allow_html=True)
-            st.page_link("pages/admin.py", label="🛡️  Admin Panel")
+            if st.button("🛡️  Admin Panel", key="nav_admin", use_container_width=True): st.switch_page("pages/admin.py")
 
         # Account
         st.markdown("<hr style='border:none;border-top:1px solid rgba(255,255,255,0.12);"
@@ -263,7 +263,7 @@ def sidebar_nav():
                 clear_session()
                 st.switch_page("pages/login.py")
         else:
-            st.page_link("pages/login.py", label="🔑  Login / Register")
+            if st.button("🔑  Login / Register", use_container_width=True, key="nav_login"): st.switch_page("pages/login.py")
 
         # Footer
         st.markdown(
