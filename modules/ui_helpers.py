@@ -237,7 +237,7 @@ def sidebar_nav():
                     f"text-transform:uppercase;color:{DARK['muted']};margin-bottom:0.3rem'>"
                     f"Navigation</div>", unsafe_allow_html=True)
 
-        if st.button("🏠  Home",                  key="nav_home",  use_container_width=True): st.switch_page("app.py")
+        if st.button("🏠  Home",                  key="nav_home",  use_container_width=True): st.switch_page("pages/dashboard.py")
         if st.button("📊  Overall Working Hours", key="nav_dash",  use_container_width=True): st.switch_page("pages/dashboard.py")
         if st.button("➕  Add Working Hours",     key="nav_add",   use_container_width=True): st.switch_page("pages/add_hours.py")
 
