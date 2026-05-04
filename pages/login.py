@@ -31,7 +31,7 @@ st.markdown(f"""
         Octa Platform
     </h1>
     <p style="color:{DARK['muted']};font-size:0.95rem;margin:0">
-        Working hours tracking system
+        Proposal tracking &amp; partner management
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -92,15 +92,42 @@ with tab_register:
     reg_email    = st.text_input("Email address *", key="reg_email",
                                   placeholder="you@example.com")
 
-    # ── Organisation (plain text) ──────────────────────────────────────────────
-    reg_org = st.text_input(
-        "Organisation / Partner",
-        key="reg_org",
-        placeholder="Name of your organisation or institution",
+    # ── Organisation dropdown (from partners table) ────────────────────────────
+    OTHER_ORG = "➕  My organisation is not in the list"
+    try:
+        from modules.database import get_all_partners
+        partner_names = [p["full_name"] for p in get_all_partners()
+                         if p.get("full_name")]
+    except Exception:
+        partner_names = []
+
+    org_options    = ["— Select your organisation —"] + sorted(partner_names) + [OTHER_ORG]
+    reg_org_select = st.selectbox(
+        "Organisation / Partner *",
+        options=org_options,
+        key="reg_org_select",
+        help="Select your organisation. If not listed, choose the last option."
     )
 
+    reg_org_custom = ""
+    if reg_org_select == OTHER_ORG:
+        reg_org_custom = st.text_input(
+            "Enter your organisation name *",
+            key="reg_org_custom",
+            placeholder="Full name of your organisation",
+        )
+        st.markdown(
+            f"<p style='color:{DARK['muted']};font-size:0.8rem;margin-top:-0.4rem'>"
+            f"The admin will add your organisation to the partners list after approval.</p>",
+            unsafe_allow_html=True
+        )
+
     def _org_value():
-        return reg_org.strip()
+        if reg_org_select == OTHER_ORG:
+            return reg_org_custom.strip()
+        if reg_org_select.startswith("—"):
+            return ""
+        return reg_org_select
 
     # Password
     rc3, rc4 = st.columns(2)
@@ -123,6 +150,10 @@ with tab_register:
             st.error("❌ Passwords do not match.")
         elif not all([reg_first, reg_last, reg_username, reg_email, reg_pass]):
             st.warning("Please fill in all required fields.")
+        elif reg_org_select.startswith("—"):
+            st.warning("Please select your organisation.")
+        elif reg_org_select == OTHER_ORG and not reg_org_custom.strip():
+            st.warning("Please enter your organisation name.")
         else:
             ok, msg, user = register_user(
                 reg_email, reg_username, reg_first, reg_last, reg_pass,
