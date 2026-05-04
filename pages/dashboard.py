@@ -11,7 +11,7 @@ from datetime import date
 from modules.auth import require_auth
 from modules.ui_helpers import (inject_css, sidebar_nav, page_header,
                                  section_label, stat_box, DARK)
-from modules.database import get_user_logs
+from modules.database import get_user_logs, get_proposal_acronyms, get_project_acronyms
 from config import HOURS_PER_DAY, HOURS_PER_WEEK, DARK as D
 
 st.set_page_config(page_title="My Dashboard — Octa Hours",
@@ -40,6 +40,27 @@ df = pd.DataFrame(logs)
 df["hours_worked"] = pd.to_numeric(df["hours_worked"], errors="coerce").fillna(0)
 df["log_date"]     = pd.to_datetime(df["log_date"])
 
+# ── Build acronym lookup: proposal_id / project_id → display label ───────────
+proposal_map = {
+    p["proposal_id"]: (p.get("acronym","").strip() or p["proposal_id"])
+    for p in get_proposal_acronyms()
+}
+project_map = {
+    p["project_id"]: (p.get("acronym","").strip() or p["project_id"])
+    for p in get_project_acronyms()
+}
+
+def _display_label(row):
+    """Return acronym if available, else the ID — for both proposals and projects."""
+    if row.get("entry_type") == "project":
+        pid = row.get("project_id","")
+        return project_map.get(pid, pid) if pid else "—"
+    else:
+        pid = row.get("proposal_id","")
+        return proposal_map.get(pid, pid) if pid else "—"
+
+df["display_label"] = df.apply(_display_label, axis=1)
+
 # ── KPI strip ─────────────────────────────────────────────────────────────────
 total_h    = df["hours_worked"].sum()
 approved_h = df[df["status"]=="approved"]["hours_worked"].sum()
@@ -63,12 +84,12 @@ st.markdown("<br>", unsafe_allow_html=True)
 section_label("Hours per Proposal")
 prop_df = df[df["entry_type"]=="proposal"].copy()
 if not prop_df.empty:
-    grp = prop_df.groupby("proposal_id")["hours_worked"].sum().reset_index()
+    grp = prop_df.groupby("display_label")["hours_worked"].sum().reset_index()
     grp = grp.sort_values("hours_worked", ascending=True)
     grp["days"] = (grp["hours_worked"] / HOURS_PER_DAY).round(2)
 
     fig_p = go.Figure(go.Bar(
-        x=grp["hours_worked"], y=grp["proposal_id"],
+        x=grp["hours_worked"], y=grp["display_label"],
         orientation="h",
         marker=dict(color=D["accent"], line=dict(width=0)),
         text=grp["hours_worked"].apply(lambda v: f"{v:.1f}h"),
@@ -90,10 +111,10 @@ else:
 proj_df = df[df["entry_type"]=="project"].copy()
 if not proj_df.empty:
     section_label("Hours per Project")
-    grp2 = proj_df.groupby("project_id")["hours_worked"].sum().reset_index()
+    grp2 = proj_df.groupby("display_label")["hours_worked"].sum().reset_index()
     grp2 = grp2.sort_values("hours_worked", ascending=True)
     fig_pj = go.Figure(go.Bar(
-        x=grp2["hours_worked"], y=grp2["project_id"],
+        x=grp2["hours_worked"], y=grp2["display_label"],
         orientation="h",
         marker=dict(color=D["accent2"], line=dict(width=0)),
         text=grp2["hours_worked"].apply(lambda v: f"{v:.1f}h"),
