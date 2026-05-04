@@ -127,48 +127,72 @@ with tab_add:
                 ref_id   = proj_opts[selected]
 
         section_label("⏰ Working Hours")
-        tc1, tc2, tc3 = st.columns(3)
 
-        def _parse_time(v, default):
-            if not v:
-                return default
+        # Use selectboxes — st.time_input causes React errors in some Streamlit versions
+        HOURS   = [f"{h:02d}" for h in range(0, 24)]
+        MINUTES = ["00", "15", "30", "45"]
+
+        def _parse_hm(v, default_h, default_m):
+            """Extract (hour_str, minute_str) from a stored time string."""
             try:
                 parts = str(v)[:5].split(":")
-                return time(int(parts[0]), int(parts[1]))
+                h = f"{int(parts[0]):02d}"
+                m_raw = int(parts[1])
+                # Round to nearest 15
+                m = f"{(m_raw // 15) * 15:02d}"
+                return h, m
             except Exception:
-                return default
+                return f"{default_h:02d}", f"{default_m:02d}"
 
+        s_h, s_m = _parse_hm(_v("start_time"), 9,  0)
+        e_h, e_m = _parse_hm(_v("end_time"),   17, 0)
+
+        tc1, tc2, tc3 = st.columns(3)
         with tc1:
-            start_time = st.time_input(
-                "Start time *",
-                value=_parse_time(_v("start_time"), time(9, 0)),
-                step=900   # 15-minute steps
-            )
+            st.markdown("**Start time \\***")
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                sh = st.selectbox("Hour",   HOURS,   index=HOURS.index(s_h),
+                                  key="start_h", label_visibility="collapsed")
+            with sc2:
+                sm = st.selectbox("Min",    MINUTES, index=MINUTES.index(s_m) if s_m in MINUTES else 0,
+                                  key="start_m", label_visibility="collapsed")
+            start_time = time(int(sh), int(sm))
+
         with tc2:
-            end_time = st.time_input(
-                "End time *",
-                value=_parse_time(_v("end_time"), time(17, 0)),
-                step=900
-            )
+            st.markdown("**End time \\***")
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                eh = st.selectbox("Hour",   HOURS,   index=HOURS.index(e_h),
+                                  key="end_h", label_visibility="collapsed")
+            with ec2:
+                em = st.selectbox("Min",    MINUTES, index=MINUTES.index(e_m) if e_m in MINUTES else 0,
+                                  key="end_m", label_visibility="collapsed")
+            end_time = time(int(eh), int(em))
+
         with tc3:
-            # Live preview of hours
+            # Live hours preview
+            st.markdown("**Hours worked**")
             if end_time > start_time:
-                mins = (end_time.hour*60+end_time.minute) - \
-                       (start_time.hour*60+start_time.minute)
+                mins = (end_time.hour*60 + end_time.minute) - \
+                       (start_time.hour*60 + start_time.minute)
                 hrs  = mins / 60
+                accent = DARK["accent"]
+                muted  = DARK["muted"]
+                bg2    = DARK["bg2"]
                 st.markdown(
-                    f"<div style='background:{DARK['bg2']};border:1px solid "
-                    f"{DARK['accent']}44;border-radius:8px;padding:0.7rem;"
-                    f"text-align:center;margin-top:1.5rem'>"
-                    f"<div style='color:{DARK['muted']};font-size:0.72rem'>HOURS</div>"
-                    f"<div style='color:{DARK['accent']};font-size:1.8rem;"
-                    f"font-weight:700'>{hrs:.2f}</div></div>",
+                    f"<div style='background:{bg2};border:1px solid {accent}44;"
+                    f"border-radius:8px;padding:0.7rem;text-align:center'>"
+                    f"<div style='color:{muted};font-size:0.72rem'>TOTAL</div>"
+                    f"<div style='color:{accent};font-size:1.8rem;font-weight:700'>"
+                    f"{hrs:.2f}h</div></div>",
                     unsafe_allow_html=True
                 )
             else:
+                danger = DARK["danger"]
                 st.markdown(
-                    f"<div style='color:{DARK['danger']};margin-top:1.5rem;"
-                    f"font-size:0.85rem'>⚠️ End must be after start</div>",
+                    f"<div style='color:{danger};font-size:0.85rem'>"
+                    f"⚠️ End must be after start</div>",
                     unsafe_allow_html=True
                 )
 
