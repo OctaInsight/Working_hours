@@ -20,7 +20,7 @@ inject_css()
 sidebar_nav()
 
 if is_authenticated():
-    st.switch_page("app.py")
+    st.switch_page("pages/dashboard.py")
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown(f"""
@@ -57,7 +57,7 @@ with tab_login:
             ok, msg, user = login_user(li_email, li_pass)
             if ok:
                 set_session(user)
-                st.switch_page("app.py")
+                st.switch_page("pages/dashboard.py")
             else:
                 st.error(f"❌ {msg}")
 
