@@ -29,19 +29,31 @@ if not is_admin():
 
 page_header("Admin Panel", "Approve working hours and view team statistics", "🛡️")
 
-admin_username = st.session_state.get("username","admin")
-admin_org      = st.session_state.get("organisation","")
+admin_username = st.session_state.get("username", "admin")
+admin_org      = st.session_state.get("organisation", "")
+admin_user_id  = st.session_state.get("user_id")
 
 # ── Load team ─────────────────────────────────────────────────────────────────
-# Admin sees users from same organisation (or all if no org set)
-if admin_org:
-    team = get_org_users(admin_org)
-else:
-    team = get_all_users_approved()
+# Get all approved users — filter by org if admin has one set
+all_approved = get_all_users_approved()
 
-team_ids  = [u["id"] for u in team]
-team_map  = {u["id"]: f"{u.get('first_name','')} {u.get('last_name','')}".strip()
-             or u.get("username","") for u in team}
+if admin_org:
+    team = [u for u in all_approved if u.get("organisation","") == admin_org]
+    # If filter returns nothing (org mismatch), fall back to all
+    if not team:
+        team = all_approved
+else:
+    team = all_approved
+
+# Always ensure admin's own ID is included
+team_ids = list({u["id"] for u in team} | {admin_user_id})
+team_map = {u["id"]: (
+    f"{u.get('first_name','')} {u.get('last_name','')}".strip()
+    or u.get("username","")
+) for u in all_approved}
+# Add admin to map if not already present
+if admin_user_id not in team_map:
+    team_map[admin_user_id] = st.session_state.get("first_name","") or admin_username
 
 # Pending count badge
 pending = get_pending_logs(team_ids) if team_ids else []
@@ -135,7 +147,23 @@ with tab_stats:
     else:
         df = pd.DataFrame(all_logs)
         df["hours_worked"] = pd.to_numeric(df["hours_worked"],errors="coerce").fillna(0)
-        df["employee"]     = df["user_id"].map(team_map)
+        df["employee"]     = df["user_id"].map(team_map).fillna("Unknown")
+
+        # Acronym lookup for proposals and projects
+        from modules.database import get_proposal_acronyms, get_project_acronyms
+        proposal_map = {p["proposal_id"]: (p.get("acronym","").strip() or p["proposal_id"])
+                        for p in get_proposal_acronyms()}
+        project_map  = {p["project_id"]:  (p.get("acronym","").strip() or p["project_id"])
+                        for p in get_project_acronyms()}
+
+        def _label(row):
+            if row.get("entry_type") == "project":
+                pid = row.get("project_id","")
+                return project_map.get(pid, pid) if pid else "—"
+            pid = row.get("proposal_id","")
+            return proposal_map.get(pid, pid) if pid else "—"
+
+        df["display_label"] = df.apply(_label, axis=1)
 
         # KPIs
         total_h = df["hours_worked"].sum()
@@ -172,10 +200,10 @@ with tab_stats:
         prop_logs = df[df["entry_type"]=="proposal"]
         if not prop_logs.empty:
             section_label("Hours per Proposal (all employees)")
-            p_grp = prop_logs.groupby("proposal_id")["hours_worked"].sum().reset_index()
+            p_grp = prop_logs.groupby("display_label")["hours_worked"].sum().reset_index()
             p_grp = p_grp.sort_values("hours_worked", ascending=True)
             fig_pp = go.Figure(go.Bar(
-                x=p_grp["hours_worked"], y=p_grp["proposal_id"],
+                x=p_grp["hours_worked"], y=p_grp["display_label"],
                 orientation="h",
                 marker=dict(color=D["accent2"], line=dict(width=0)),
                 text=p_grp["hours_worked"].apply(lambda v: f"{v:.1f}h"),
@@ -192,7 +220,7 @@ with tab_stats:
 
         # Employee × Proposal matrix
         section_label("Employee × Proposal Breakdown (hours)")
-        pivot = df.groupby(["employee","proposal_id"])["hours_worked"] \
+        pivot = df.groupby(["employee","display_label"])["hours_worked"] \
                   .sum().unstack(fill_value=0).round(2)
         if not pivot.empty:
             st.dataframe(pivot.style.background_gradient(
