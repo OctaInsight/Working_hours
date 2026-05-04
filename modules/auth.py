@@ -179,6 +179,7 @@ def set_session(user: dict):
     st.session_state.email         = user.get("email", "")
     st.session_state.role          = user.get("role", "user")
     st.session_state.apps_access   = apps
+    st.session_state.organisation  = user.get("organisation", "")
 
 
 def clear_session():
