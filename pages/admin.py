@@ -151,7 +151,7 @@ with tab_reg:
                 selected_apps = st.multiselect(
                     "Grant access to:",
                     options=ALL_APPS,
-                    default=["octa_proposals"],
+                    default=[a for a in ["octa_proposals"] if a in ALL_APPS],
                     format_func=lambda k: APP_LABELS.get(k, k),
                     key=f"apps_{uid}"
                 )
@@ -314,7 +314,8 @@ with tab_approved:
                 ec2.markdown(f"**Approved:** {str(u.get('approved_at','—'))[:10]}")
 
                 new_apps = st.multiselect(
-                    "App access:", ALL_APPS, default=apps_val,
+                    "App access:", ALL_APPS,
+                    default=[a for a in apps_val if a in ALL_APPS],
                     format_func=lambda k: APP_LABELS.get(k, k),
                     key=f"edit_apps_{uid}"
                 )
@@ -350,12 +351,181 @@ with tab_approved:
                             st.error(f"Error: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — All Users summary table
+# TAB 4 — All Users — rich list with stats
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_all:
     all_users = _load_users()
-    if all_users:
-        df_u = pd.DataFrame([{
+    if not all_users:
+        st.info("No users found in the database.")
+    else:
+        # ── Summary KPIs ──────────────────────────────────────────────────────
+        total      = len(all_users)
+        approved   = sum(1 for u in all_users if u.get("status") == "approved")
+        pending_n  = sum(1 for u in all_users if u.get("status") == "pending")
+        disabled_n = sum(1 for u in all_users if u.get("status") == "disabled")
+        admins_n   = sum(1 for u in all_users if u.get("role") == "admin")
+
+        k1,k2,k3,k4,k5 = st.columns(5)
+        for col, label, val, color in [
+            (k1, "Total Users",   total,      DARK["accent"]),
+            (k2, "Approved",      approved,   DARK["success"]),
+            (k3, "Pending",       pending_n,  DARK["warning"]),
+            (k4, "Disabled",      disabled_n, DARK["danger"]),
+            (k5, "Admins",        admins_n,   DARK["accent2"]),
+        ]:
+            col.markdown(
+                f"<div style='background:{DARK["bg2"]};border:1px solid {color}44;"
+                f"border-top:3px solid {color};border-radius:10px;"
+                f"padding:0.9rem;text-align:center'>"
+                f"<div style='font-size:1.8rem;font-weight:700;color:{color}'>{val}</div>"
+                f"<div style='font-size:0.78rem;color:{DARK["muted"]}'>{label}</div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Filters ───────────────────────────────────────────────────────────
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            f_status = st.selectbox("Filter by status",
+                ["All","approved","pending","disabled"], key="all_status")
+        with fc2:
+            f_role = st.selectbox("Filter by role",
+                ["All","user","admin"], key="all_role")
+        with fc3:
+            f_search = st.text_input("Search name / email / org",
+                placeholder="Type to search…", key="all_search")
+
+        filtered = all_users
+        if f_status != "All":
+            filtered = [u for u in filtered if u.get("status") == f_status]
+        if f_role != "All":
+            filtered = [u for u in filtered if u.get("role") == f_role]
+        if f_search:
+            q = f_search.lower()
+            filtered = [u for u in filtered if
+                q in f"{u.get('first_name','')} {u.get('last_name','')}".lower() or
+                q in (u.get("email","") or "").lower() or
+                q in (u.get("organisation","") or "").lower() or
+                q in (u.get("username","") or "").lower()
+            ]
+
+        st.markdown(
+            f"<p style='color:{DARK["muted"]};font-size:0.84rem'>"
+            f"Showing <strong style='color:{DARK["text"]}'>{len(filtered)}</strong>"
+            f" of {total} users</p>",
+            unsafe_allow_html=True
+        )
+
+        # ── User cards ────────────────────────────────────────────────────────
+        STATUS_COLORS = {
+            "approved": DARK["success"],
+            "pending":  DARK["warning"],
+            "disabled": DARK["danger"],
+        }
+        STATUS_ICONS = {"approved":"✅","pending":"⏳","disabled":"🚫"}
+
+        for u in filtered:
+            uid        = u["id"]
+            full_name  = f"{u.get('first_name','')} {u.get('last_name','')}".strip()                          or u.get("username","")
+            status     = u.get("status","")
+            role       = u.get("role","user")
+            org        = u.get("organisation","—") or "—"
+            email      = u.get("email","")
+            username   = u.get("username","")
+            registered = str(u.get("created_at",""))[:10]
+            last_login = str(u.get("last_login","—"))[:16] if u.get("last_login") else "Never"
+            apps_val   = _parse_apps(u)
+            apps_str   = " · ".join(APP_LABELS.get(a,a) for a in apps_val) or "No apps assigned"
+            s_color    = STATUS_COLORS.get(status, DARK["muted"])
+            s_icon     = STATUS_ICONS.get(status,"❓")
+            role_badge = ("🛡️ Admin" if role=="admin" else "👤 User")
+
+            # Colored stripe above expander
+            st.markdown(
+                f"<div style='height:4px;background:{s_color};"
+                f"border-radius:4px 4px 0 0;margin-bottom:2px'></div>",
+                unsafe_allow_html=True
+            )
+
+            with st.expander(
+                f"{s_icon}  {full_name}  ·  {org}  ·  {role_badge}  ·  {status.upper()}",
+                expanded=False
+            ):
+                d1,d2,d3,d4 = st.columns(4)
+                d1.markdown(f"**Username:** {username}")
+                d2.markdown(f"**Email:** {email}")
+                d3.markdown(f"**Organisation:** {org}")
+                d4.markdown(f"**Role:** {role_badge}")
+                d1.markdown(f"**Status:** {s_icon} {status}")
+                d2.markdown(f"**Registered:** {registered}")
+                d3.markdown(f"**Last Login:** {last_login}")
+                d4.markdown(f"**Approved by:** {u.get('approved_by','—') or '—'}")
+
+                # App access chips
+                st.markdown(
+                    f"<div style='margin:0.6rem 0 0.3rem;font-size:0.8rem;"
+                    f"color:{DARK["muted"]};font-weight:600'>APP ACCESS</div>",
+                    unsafe_allow_html=True
+                )
+                if apps_val:
+                    chips = " ".join(
+                        f"<span style='background:{DARK["accent"]}22;"
+                        f"color:{DARK["accent"]};border:1px solid {DARK["accent"]}44;"
+                        f"padding:2px 9px;border-radius:12px;font-size:0.78rem;"
+                        f"margin-right:4px'>{APP_LABELS.get(a,a)}</span>"
+                        for a in apps_val
+                    )
+                    st.markdown(chips, unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f"<span style='color:{DARK["muted"]};font-size:0.84rem'>"
+                        f"No apps assigned</span>",
+                        unsafe_allow_html=True
+                    )
+
+                # Quick edit
+                st.markdown("---")
+                ea1, ea2, ea3 = st.columns([3,1,1])
+                with ea1:
+                    new_apps_all = st.multiselect(
+                        "Edit app access:", ALL_APPS,
+                        default=[a for a in apps_val if a in ALL_APPS],
+                        format_func=lambda k: APP_LABELS.get(k,k),
+                        key=f"all_apps_{uid}"
+                    )
+                with ea2:
+                    new_role_all = st.selectbox(
+                        "Role:", ["user","admin"],
+                        index=1 if role=="admin" else 0,
+                        key=f"all_role_{uid}"
+                    )
+                with ea3:
+                    new_status_all = st.selectbox(
+                        "Status:", ["approved","pending","disabled"],
+                        index=["approved","pending","disabled"].index(status)
+                            if status in ["approved","pending","disabled"] else 0,
+                        key=f"all_status_{uid}"
+                    )
+
+                sc1, sc2 = st.columns([1,5])
+                with sc1:
+                    if st.button("💾 Save Changes", key=f"all_save_{uid}",
+                                 type="primary", use_container_width=True):
+                        try:
+                            db().table("octa_users").update({
+                                "apps_access": new_apps_all,
+                                "role":        new_role_all,
+                                "status":      new_status_all,
+                            }).eq("id", uid).execute()
+                            st.success("Saved!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+        # ── Export CSV ────────────────────────────────────────────────────────
+        st.markdown("---")
+        df_export = pd.DataFrame([{
             "Name":         f"{u.get('first_name','')} {u.get('last_name','')}".strip(),
             "Username":     u.get("username",""),
             "Email":        u.get("email",""),
@@ -364,16 +534,11 @@ with tab_all:
             "Role":         u.get("role",""),
             "Apps":         ", ".join(APP_LABELS.get(a,a) for a in _parse_apps(u)) or "—",
             "Registered":   str(u.get("created_at",""))[:10],
-            "Last Login":   str(u.get("last_login","—"))[:16],
+            "Last Login":   str(u.get("last_login","—"))[:16] if u.get("last_login") else "Never",
         } for u in all_users])
-        st.dataframe(df_u, use_container_width=True, hide_index=True)
-
-        # Download
         st.download_button(
-            "📥 Export CSV",
-            data=df_u.to_csv(index=False),
+            "📥 Export All Users CSV",
+            data=df_export.to_csv(index=False),
             file_name="octa_users.csv",
             mime="text/csv",
         )
-    else:
-        st.info("No users found.")
