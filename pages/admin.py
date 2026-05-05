@@ -1,22 +1,25 @@
 """
-Octa Working Hours — Admin Panel
-Approve/return work logs, view team statistics.
+Octa Platform — Unified Admin Panel
+Copy this file to pages/admin.py in every app — no changes needed.
+
+Handles:
+  - All pending user registrations (from ALL apps, not just this one)
+  - Password reset requests (admin generates temp password, shares out-of-band)
+  - User management: approve, reject, edit access, disable
+  - App access control
 """
 import streamlit as st
+import json
+import secrets
+import string
 import pandas as pd
-import plotly.graph_objects as go
-from datetime import date
+from datetime import datetime, timezone
 
-from modules.auth import require_auth, is_admin
-from modules.ui_helpers import (inject_css, sidebar_nav, page_header,
-                                 section_label, stat_box, status_pill, DARK)
-from modules.database import (
-    get_all_users_approved, get_org_users,
-    get_logs_for_users, get_pending_logs, admin_update_log_status, db
-)
-from config import HOURS_PER_DAY, HOURS_PER_WEEK, DARK as D
+from modules.auth import require_auth, is_admin, hash_password
+from modules.database import db
+from modules.ui_helpers import inject_css, sidebar_nav, page_header, section_label, DARK
 
-st.set_page_config(page_title="Admin — Octa Working Hours",
+st.set_page_config(page_title="Admin — Octa Platform",
                    page_icon="🛡️", layout="wide",
                    initial_sidebar_state="expanded")
 inject_css()
@@ -27,241 +30,350 @@ if not is_admin():
     st.error("🚫 Access denied. Admin role required.")
     st.stop()
 
-page_header("Admin Panel", "Approve working hours and view team statistics", "🛡️")
+page_header("Admin Panel", "User management for all Octa Platform applications", "🛡️")
 
 admin_username = st.session_state.get("username", "admin")
-admin_org      = st.session_state.get("organisation", "")
-admin_user_id  = st.session_state.get("user_id")
 
-# ── Load team ─────────────────────────────────────────────────────────────────
-# Get all approved users — filter by org if admin has one set
-all_approved = get_all_users_approved()
+ALL_APPS = [
+    "octa_proposals",
+    "octa_hours",
+    "octa_writer",
+    "octa_intelligence",
+    "octa_kpi",
+    "octa_partners",
+    "octa_social",
+    "octa_communication",
+    "octa_projects",
+    "octa_calendar",
+]
 
-if admin_org:
-    team = [u for u in all_approved if u.get("organisation","") == admin_org]
-    # If filter returns nothing (org mismatch), fall back to all
-    if not team:
-        team = all_approved
-else:
-    team = all_approved
+APP_LABELS = {
+    "octa_proposals":     "📋 Proposal Tracking",
+    "octa_hours":         "⏱️ Working Hours",
+    "octa_writer":        "📝 Writing App",
+    "octa_intelligence":  "🤖 Proposal Intelligence",
+    "octa_kpi":           "📊 KPI & Gantt",
+    "octa_partners":      "🤝 Partner App",
+    "octa_social":        "📱 Social Media",
+    "octa_communication": "📧 Partner Communication",
+    "octa_projects":      "🏗️ Project Tracking",
+    "octa_calendar":      "📅 Calendar",
+}
 
-# Always ensure admin's own ID is included
-team_ids = list({u["id"] for u in team} | {admin_user_id})
-team_map = {u["id"]: (
-    f"{u.get('first_name','')} {u.get('last_name','')}".strip()
-    or u.get("username","")
-) for u in all_approved}
-# Add admin to map if not already present
-if admin_user_id not in team_map:
-    team_map[admin_user_id] = st.session_state.get("first_name","") or admin_username
 
-# Pending count badge
-pending = get_pending_logs(team_ids) if team_ids else []
-if pending:
+def _parse_apps(u: dict) -> list:
+    apps = u.get("apps_access") or []
+    if isinstance(apps, str):
+        try:    return json.loads(apps)
+        except: return []
+    return list(apps)
+
+
+def _load_users(status_filter=None) -> list:
+    try:
+        q = db().table("octa_users").select("*").order("created_at", desc=True)
+        if status_filter:
+            q = q.eq("status", status_filter)
+        return q.execute().data or []
+    except Exception:
+        return []
+
+
+def _load_reset_requests(status="pending") -> list:
+    try:
+        resp = db().table("password_reset_requests").select("*") \
+                   .eq("status", status) \
+                   .order("requested_at", desc=True).execute()
+        return resp.data or []
+    except Exception:
+        return []
+
+
+def _gen_temp_password(length=12) -> str:
+    """Generate a readable temporary password."""
+    chars = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(chars) for _ in range(length))
+
+
+# ── Counts for tab badges ─────────────────────────────────────────────────────
+pending_users   = _load_users("pending")
+pending_resets  = _load_reset_requests("pending")
+n_users         = len(pending_users)
+n_resets        = len(pending_resets)
+
+# ── Alert banner ──────────────────────────────────────────────────────────────
+total_pending = n_users + n_resets
+if total_pending > 0:
+    items = []
+    if n_users:  items.append(f"{n_users} registration{'s' if n_users>1 else ''}")
+    if n_resets: items.append(f"{n_resets} password reset{'s' if n_resets>1 else ''}")
     st.markdown(f"""
     <div style="background:rgba(246,204,82,0.15);border:1px solid rgba(246,204,82,0.4);
-                border-left:5px solid {D['warning']};border-radius:10px;
+                border-left:5px solid {DARK['warning']};border-radius:10px;
                 padding:0.9rem 1.2rem;margin-bottom:1rem">
-        ⏳ <strong style="color:{D['warning']};font-size:1rem">
-        {len(pending)} entr{'y' if len(pending)==1 else 'ies'} waiting for approval
+        ⏳ <strong style="color:{DARK['warning']}">
+        {" and ".join(items)} waiting for your action
         </strong>
+    </div>""", unsafe_allow_html=True)
+
+tab_reg, tab_reset, tab_approved, tab_all = st.tabs([
+    f"⏳ Registrations ({n_users})",
+    f"🔑 Password Resets ({n_resets})",
+    "✅ Approved Users",
+    "👥 All Users",
+])
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — Pending Registrations
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_reg:
+    if not pending_users:
+        st.success("✅ No pending registrations — all clear.")
+    else:
+        for u in pending_users:
+            full_name = f"{u.get('first_name','')} {u.get('last_name','')}".strip()
+            org       = u.get("organisation","—") or "—"
+            uid       = u["id"]
+
+            with st.expander(
+                f"⏳  {full_name}  ·  {u.get('username','')}  ·  "
+                f"{u.get('email','')}  ·  {org}",
+                expanded=True
+            ):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.markdown(f"**Name:** {full_name}")
+                c2.markdown(f"**Username:** {u.get('username','')}")
+                c3.markdown(f"**Email:** {u.get('email','')}")
+                c4.markdown(f"**Organisation:** {org}")
+                c1.markdown(f"**Registered:** {str(u.get('created_at',''))[:16]}")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                selected_apps = st.multiselect(
+                    "Grant access to:",
+                    options=ALL_APPS,
+                    default=["octa_proposals"],
+                    format_func=lambda k: APP_LABELS.get(k, k),
+                    key=f"apps_{uid}"
+                )
+
+                bc1, bc2, _ = st.columns([1, 1, 4])
+                with bc1:
+                    if st.button("✅ Approve", key=f"approve_{uid}",
+                                 type="primary", use_container_width=True):
+                        try:
+                            db().table("octa_users").update({
+                                "status":      "approved",
+                                "apps_access": selected_apps,
+                                "approved_at": datetime.now(timezone.utc).isoformat(),
+                                "approved_by": admin_username,
+                            }).eq("id", uid).execute()
+                            st.success(f"✅ {full_name} approved!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                with bc2:
+                    if st.button("🚫 Reject", key=f"reject_{uid}",
+                                 use_container_width=True):
+                        try:
+                            db().table("octa_users").update({
+                                "status": "disabled"
+                            }).eq("id", uid).execute()
+                            st.warning(f"Rejected {full_name}.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — Password Reset Requests (SECURE — token shown only to admin)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_reset:
+    st.markdown(f"""
+    <div style="background:rgba(0,188,212,0.1);border:1px solid rgba(0,188,212,0.3);
+                border-left:4px solid {DARK['accent']};border-radius:10px;
+                padding:0.8rem 1rem;margin-bottom:1rem;font-size:0.88rem">
+        <strong style="color:{DARK['accent']}">Secure reset process</strong><br>
+        You generate a temporary password here and share it with the user through
+        a separate channel (phone, email, in person). The user never sees a token
+        on their screen — only you see the temporary password.
     </div>
     """, unsafe_allow_html=True)
 
-tab_approve, tab_stats, tab_team = st.tabs(
-    [f"⏳ Pending ({len(pending)})", "📊 Team Statistics", "👥 Team Overview"]
-)
-
-# ════════════════════════════════════════════════════════════════════════════
-# TAB 1 — Approve / Return
-# ════════════════════════════════════════════════════════════════════════════
-with tab_approve:
-    if not pending:
-        st.success("✅ No pending entries — all clear.")
+    if not pending_resets:
+        st.success("✅ No pending password reset requests.")
     else:
-        for log in pending:
-            uid      = log.get("user_id")
-            emp_name = team_map.get(uid, f"User {uid}")
-            ref      = log.get("proposal_id") or log.get("project_id") or "—"
-            etype    = log.get("entry_type","proposal").capitalize()
-            hours    = float(log.get("hours_worked",0) or 0)
-            log_date = str(log.get("log_date",""))[:10]
-            comment  = log.get("comment","") or ""
-            log_id   = log["id"]
+        for req in pending_resets:
+            req_id  = req["id"]
+            user_id = req.get("user_id")
+            req_at  = str(req.get("requested_at",""))[:16]
+
+            # Load user details
+            try:
+                u_resp = db().table("octa_users").select(
+                    "first_name,last_name,username,email,organisation"
+                ).eq("id", user_id).execute()
+                u = u_resp.data[0] if u_resp.data else {}
+            except Exception:
+                u = {}
+
+            full_name = f"{u.get('first_name','')} {u.get('last_name','')}".strip()
 
             with st.expander(
-                f"⏳  {emp_name}  ·  {log_date}  ·  {ref}  ·  {hours:.2f}h",
-                expanded=False
+                f"🔑  {full_name}  ·  {u.get('email','')}  ·  Requested: {req_at}",
+                expanded=True
             ):
-                r1,r2,r3,r4 = st.columns(4)
-                r1.markdown(f"**Employee:** {emp_name}")
-                r2.markdown(f"**Date:** {log_date}")
-                r3.markdown(f"**Type:** {etype}")
-                r4.markdown(f"**Reference:** {ref}")
-                r1.markdown(f"**Start:** {str(log.get('start_time',''))[:5]}")
-                r2.markdown(f"**End:** {str(log.get('end_time',''))[:5]}")
-                r3.markdown(f"**Hours:** {hours:.2f}")
-                if comment:
-                    st.markdown(f"**Employee comment:** {comment}")
+                rc1, rc2, rc3 = st.columns(3)
+                rc1.markdown(f"**Name:** {full_name}")
+                rc2.markdown(f"**Email:** {u.get('email','')}")
+                rc3.markdown(f"**Organisation:** {u.get('organisation','—') or '—'}")
 
-                admin_cmt = st.text_input(
-                    "Comment (required for return, optional for approve)",
-                    key=f"adm_cmt_{log_id}",
-                    placeholder="Explain if returning…"
-                )
-                ac1, ac2, _ = st.columns([1,1,4])
-                with ac1:
-                    if st.button("✅ Approve", key=f"app_{log_id}",
-                                 type="primary", use_container_width=True):
-                        ok, msg = admin_update_log_status(
-                            log_id, "approved", admin_username, admin_cmt
-                        )
-                        st.success(msg) if ok else st.error(msg)
-                        st.rerun()
-                with ac2:
-                    if st.button("↩️ Return", key=f"ret_{log_id}",
-                                 use_container_width=True):
-                        if not admin_cmt.strip():
-                            st.warning("Please add a comment explaining why you are returning this entry.")
-                        else:
-                            ok, msg = admin_update_log_status(
-                                log_id, "returned", admin_username, admin_cmt
-                            )
-                            st.success(msg) if ok else st.error(msg)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Generate temp password
+                gen_key = f"temp_pw_{req_id}"
+                if st.button("🔐 Generate Temporary Password",
+                             key=f"gen_{req_id}", type="primary"):
+                    temp_pw = _gen_temp_password()
+                    st.session_state[gen_key] = temp_pw
+
+                if st.session_state.get(gen_key):
+                    temp_pw = st.session_state[gen_key]
+                    st.markdown(f"""
+                    <div style="background:{DARK['bg3']};border:2px solid {DARK['warning']};
+                                border-radius:10px;padding:1rem;margin:0.5rem 0">
+                        <div style="color:{DARK['warning']};font-size:0.78rem;
+                                    font-weight:600;margin-bottom:6px">
+                            ⚠️ TEMPORARY PASSWORD — share with user directly, not via this system
+                        </div>
+                        <div style="font-size:1.6rem;font-family:monospace;font-weight:700;
+                                    color:white;letter-spacing:0.15em">{temp_pw}</div>
+                        <div style="color:{DARK['muted']};font-size:0.75rem;margin-top:6px">
+                            The user must change this password on first login.
+                            Share via phone, personal email, or in person.
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    if st.button("✅ Mark as Resolved (I've shared the password)",
+                                 key=f"resolve_{req_id}", type="primary"):
+                        try:
+                            # Save hashed temp password to user record
+                            db().table("octa_users").update({
+                                "temp_password":         temp_pw,
+                                "force_password_change": True,
+                            }).eq("id", user_id).execute()
+
+                            # Close the request
+                            db().table("password_reset_requests").update({
+                                "status":      "completed",
+                                "resolved_at": datetime.now(timezone.utc).isoformat(),
+                                "resolved_by": admin_username,
+                            }).eq("id", req_id).execute()
+
+                            st.session_state.pop(gen_key, None)
+                            st.success("✅ Reset completed. User can now log in with the temp password.")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
-# ════════════════════════════════════════════════════════════════════════════
-# TAB 2 — Team Statistics
-# ════════════════════════════════════════════════════════════════════════════
-with tab_stats:
-    if not team_ids:
-        st.info("No team members found.")
-        st.stop()
+                rc_reject, _ = st.columns([1, 5])
+                with rc_reject:
+                    if st.button("🚫 Reject Request", key=f"rej_reset_{req_id}"):
+                        try:
+                            db().table("password_reset_requests").update({
+                                "status":      "rejected",
+                                "resolved_at": datetime.now(timezone.utc).isoformat(),
+                                "resolved_by": admin_username,
+                            }).eq("id", req_id).execute()
+                            st.warning("Reset request rejected.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
-    year = st.selectbox("Year", [date.today().year, date.today().year-1],
-                         key="admin_year")
-    all_logs = get_logs_for_users(team_ids, year=year)
-
-    if not all_logs:
-        st.info(f"No logs found for {year}.")
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — Approved Users (manage access)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_approved:
+    approved = _load_users("approved")
+    if not approved:
+        st.info("No approved users yet.")
     else:
-        df = pd.DataFrame(all_logs)
-        df["hours_worked"] = pd.to_numeric(df["hours_worked"],errors="coerce").fillna(0)
-        df["employee"]     = df["user_id"].map(team_map).fillna("Unknown")
+        for u in approved:
+            apps_val  = _parse_apps(u)
+            full_name = f"{u.get('first_name','')} {u.get('last_name','')}".strip()
+            uid       = u["id"]
+            apps_str  = ", ".join(APP_LABELS.get(a,a) for a in apps_val) or "no apps"
 
-        # Acronym lookup for proposals and projects
-        from modules.database import get_proposal_acronyms, get_project_acronyms
-        proposal_map = {p["proposal_id"]: (p.get("acronym","").strip() or p["proposal_id"])
-                        for p in get_proposal_acronyms()}
-        project_map  = {p["project_id"]:  (p.get("acronym","").strip() or p["project_id"])
-                        for p in get_project_acronyms()}
+            with st.expander(
+                f"✅  {full_name}  ·  {u.get('username','')}  ·  {apps_str}"
+            ):
+                ec1, ec2, ec3 = st.columns(3)
+                ec1.markdown(f"**Email:** {u.get('email','')}")
+                ec2.markdown(f"**Organisation:** {u.get('organisation','—') or '—'}")
+                ec3.markdown(f"**Role:** {u.get('role','user')}")
+                ec1.markdown(f"**Last login:** {str(u.get('last_login','—'))[:16]}")
+                ec2.markdown(f"**Approved:** {str(u.get('approved_at','—'))[:10]}")
 
-        def _label(row):
-            if row.get("entry_type") == "project":
-                pid = row.get("project_id","")
-                return project_map.get(pid, pid) if pid else "—"
-            pid = row.get("proposal_id","")
-            return proposal_map.get(pid, pid) if pid else "—"
+                new_apps = st.multiselect(
+                    "App access:", ALL_APPS, default=apps_val,
+                    format_func=lambda k: APP_LABELS.get(k, k),
+                    key=f"edit_apps_{uid}"
+                )
+                new_role = st.selectbox(
+                    "Role:", ["user","admin"],
+                    index=1 if u.get("role")=="admin" else 0,
+                    key=f"role_{uid}"
+                )
 
-        df["display_label"] = df.apply(_label, axis=1)
+                sc1, sc2, _ = st.columns([1, 1, 4])
+                with sc1:
+                    if st.button("💾 Save", key=f"save_{uid}",
+                                 use_container_width=True):
+                        try:
+                            db().table("octa_users").update({
+                                "apps_access": new_apps,
+                                "role":        new_role,
+                            }).eq("id", uid).execute()
+                            st.success("Saved!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                with sc2:
+                    if st.button("🚫 Disable", key=f"disable_{uid}",
+                                 use_container_width=True):
+                        try:
+                            db().table("octa_users").update({
+                                "status": "disabled"
+                            }).eq("id", uid).execute()
+                            st.warning("Account disabled.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
-        # KPIs
-        total_h = df["hours_worked"].sum()
-        appr_h  = df[df["status"]=="approved"]["hours_worked"].sum()
-        k1,k2,k3,k4 = st.columns(4)
-        stat_box(k1,"Total Team Hours",    f"{total_h:.1f}h",  D["accent"])
-        stat_box(k2,"Approved Hours",      f"{appr_h:.1f}h",   D["success"])
-        stat_box(k3,"Equiv. Person-Days",  f"{total_h/HOURS_PER_DAY:.1f}",  D["accent2"])
-        stat_box(k4,"Equiv. Person-Weeks", f"{total_h/HOURS_PER_WEEK:.1f}", D["accent"])
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — All Users summary table
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_all:
+    all_users = _load_users()
+    if all_users:
+        df_u = pd.DataFrame([{
+            "Name":         f"{u.get('first_name','')} {u.get('last_name','')}".strip(),
+            "Username":     u.get("username",""),
+            "Email":        u.get("email",""),
+            "Organisation": u.get("organisation","—") or "—",
+            "Status":       u.get("status",""),
+            "Role":         u.get("role",""),
+            "Apps":         ", ".join(APP_LABELS.get(a,a) for a in _parse_apps(u)) or "—",
+            "Registered":   str(u.get("created_at",""))[:10],
+            "Last Login":   str(u.get("last_login","—"))[:16],
+        } for u in all_users])
+        st.dataframe(df_u, use_container_width=True, hide_index=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Hours per employee
-        section_label("Hours per Employee")
-        emp_grp = df.groupby("employee")["hours_worked"].sum().reset_index()
-        emp_grp = emp_grp.sort_values("hours_worked", ascending=True)
-        fig_e = go.Figure(go.Bar(
-            x=emp_grp["hours_worked"], y=emp_grp["employee"],
-            orientation="h",
-            marker=dict(color=D["accent"], line=dict(width=0)),
-            text=emp_grp["hours_worked"].apply(lambda v: f"{v:.1f}h"),
-            textposition="outside",
-        ))
-        fig_e.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            height=max(200, len(emp_grp)*40), margin=dict(l=0,r=60,t=10,b=0),
-            font_color=D["text"],
-            xaxis=dict(gridcolor="rgba(255,255,255,0.05)", ticksuffix="h"),
-            yaxis=dict(showgrid=False),
+        # Download
+        st.download_button(
+            "📥 Export CSV",
+            data=df_u.to_csv(index=False),
+            file_name="octa_users.csv",
+            mime="text/csv",
         )
-        st.plotly_chart(fig_e, use_container_width=True)
-
-        # Hours per proposal
-        prop_logs = df[df["entry_type"]=="proposal"]
-        if not prop_logs.empty:
-            section_label("Hours per Proposal (all employees)")
-            p_grp = prop_logs.groupby("display_label")["hours_worked"].sum().reset_index()
-            p_grp = p_grp.sort_values("hours_worked", ascending=True)
-            fig_pp = go.Figure(go.Bar(
-                x=p_grp["hours_worked"], y=p_grp["display_label"],
-                orientation="h",
-                marker=dict(color=D["accent2"], line=dict(width=0)),
-                text=p_grp["hours_worked"].apply(lambda v: f"{v:.1f}h"),
-                textposition="outside",
-            ))
-            fig_pp.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                height=max(200, len(p_grp)*36), margin=dict(l=0,r=60,t=10,b=0),
-                font_color=D["text"],
-                xaxis=dict(gridcolor="rgba(255,255,255,0.05)", ticksuffix="h"),
-                yaxis=dict(showgrid=False),
-            )
-            st.plotly_chart(fig_pp, use_container_width=True)
-
-        # Employee × Proposal matrix
-        section_label("Employee × Proposal Breakdown (hours)")
-        pivot = df.groupby(["employee","display_label"])["hours_worked"] \
-                  .sum().unstack(fill_value=0).round(2)
-        if not pivot.empty:
-            st.dataframe(pivot, use_container_width=True)
-
-# ════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Team Overview table
-# ════════════════════════════════════════════════════════════════════════════
-with tab_team:
-    year2     = st.selectbox("Year", [date.today().year, date.today().year-1],
-                              key="team_year")
-    all_logs2 = get_logs_for_users(team_ids, year=year2)
-
-    if not all_logs2 or not team:
-        st.info("No data available.")
     else:
-        df2 = pd.DataFrame(all_logs2)
-        df2["hours_worked"] = pd.to_numeric(df2["hours_worked"],errors="coerce").fillna(0)
-
-        rows = []
-        for u in team:
-            uid    = u["id"]
-            name   = team_map.get(uid,"")
-            u_logs = df2[df2["user_id"]==uid]
-            total  = u_logs["hours_worked"].sum()
-            appr   = u_logs[u_logs["status"]=="approved"]["hours_worked"].sum()
-            pend   = u_logs[u_logs["status"]=="pending"]["hours_worked"].sum()
-            ret    = u_logs[u_logs["status"]=="returned"]["hours_worked"].sum()
-            rows.append({
-                "Employee":        name,
-                "Organisation":    u.get("organisation","—"),
-                "Total Hours":     round(total,2),
-                "Approved":        round(appr,2),
-                "Pending":         round(pend,2),
-                "Returned":        round(ret,2),
-                "Equiv. Days":     round(total/HOURS_PER_DAY,2),
-                "Equiv. Weeks":    round(total/HOURS_PER_WEEK,2),
-                "Entries":         len(u_logs),
-            })
-
-        st.dataframe(
-            pd.DataFrame(rows),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.info("No users found.")
