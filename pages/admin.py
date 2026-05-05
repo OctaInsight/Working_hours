@@ -19,6 +19,7 @@ from modules.auth import require_auth, is_admin, hash_password
 from modules.database import db
 from modules.ui_helpers import inject_css, sidebar_nav, page_header, section_label, DARK
 
+
 st.set_page_config(page_title="Admin — Octa Platform",
                    page_icon="🛡️", layout="wide",
                    initial_sidebar_state="expanded")
@@ -101,12 +102,23 @@ pending_resets  = _load_reset_requests("pending")
 n_users         = len(pending_users)
 n_resets        = len(pending_resets)
 
+# Working hours pending — always loaded, visible in all apps
+pending_hours_logs = []
+n_hours = 0
+try:
+    _hrs_resp = db().table("work_logs").select("*")                     .eq("status","pending")                     .order("log_date", desc=True).execute()
+    pending_hours_logs = _hrs_resp.data or []
+    n_hours = len(pending_hours_logs)
+except Exception:
+    pass  # work_logs table may not exist in all apps yet
+
 # ── Alert banner ──────────────────────────────────────────────────────────────
-total_pending = n_users + n_resets
+total_pending = n_users + n_resets + n_hours
 if total_pending > 0:
     items = []
     if n_users:  items.append(f"{n_users} registration{'s' if n_users>1 else ''}")
     if n_resets: items.append(f"{n_resets} password reset{'s' if n_resets>1 else ''}")
+    if n_hours:  items.append(f"{n_hours} working hour entr{'y' if n_hours==1 else 'ies'}")
     st.markdown(f"""
     <div style="background:rgba(246,204,82,0.15);border:1px solid rgba(246,204,82,0.4);
                 border-left:5px solid {DARK['warning']};border-radius:10px;
@@ -116,9 +128,10 @@ if total_pending > 0:
         </strong>
     </div>""", unsafe_allow_html=True)
 
-tab_reg, tab_reset, tab_approved, tab_all = st.tabs([
+tab_reg, tab_reset, tab_hours, tab_approved, tab_all = st.tabs([
     f"⏳ Registrations ({n_users})",
     f"🔑 Password Resets ({n_resets})",
+    f"⏱️ Working Hours ({n_hours})",
     "✅ Approved Users",
     "👥 All Users",
 ])
@@ -288,6 +301,112 @@ with tab_reset:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2b — Working Hours Approval (octa_hours app only)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_hours:
+    if not pending_hours_logs:
+        st.success("✅ No pending working hour entries — all clear.")
+    else:
+        # Load user map for display
+        try:
+            _u_resp = db().table("octa_users").select(
+                "id,first_name,last_name,username"
+            ).execute()
+            _umap = {
+                u["id"]: f"{u.get('first_name','')} {u.get('last_name','')}".strip()
+                         or u.get("username","")
+                for u in (_u_resp.data or [])
+            }
+        except Exception:
+            _umap = {}
+
+            # Load proposal acronyms for display
+            try:
+                _prop_resp = db().table("proposals").select(
+                    "proposal_id,acronym"
+                ).execute()
+                _prop_map = {
+                    p["proposal_id"]: p.get("acronym","").strip() or p["proposal_id"]
+                    for p in (_prop_resp.data or [])
+                }
+            except Exception:
+                _prop_map = {}
+
+            admin_uname = st.session_state.get("username","admin")
+
+            for log in pending_hours_logs:
+                log_id    = log["id"]
+                uid       = log.get("user_id")
+                emp_name  = _umap.get(uid, f"User {uid}")
+                ref       = log.get("proposal_id") or log.get("project_id") or "—"
+                ref_label = _prop_map.get(ref, ref) if log.get("proposal_id") else ref
+                etype     = log.get("entry_type","proposal").capitalize()
+                hours     = float(log.get("hours_worked",0) or 0)
+                log_date  = str(log.get("log_date",""))[:10]
+                comment   = log.get("comment","") or ""
+
+                st.markdown(
+                    f"<div style='height:4px;background:{DARK["warning"]};"
+                    f"border-radius:4px 4px 0 0;margin-bottom:2px'></div>",
+                    unsafe_allow_html=True
+                )
+
+                with st.expander(
+                    f"⏳  {emp_name}  ·  {log_date}  ·  {ref_label}  ·  {hours:.2f}h",
+                    expanded=False
+                ):
+                    r1,r2,r3,r4 = st.columns(4)
+                    r1.markdown(f"**Employee:** {emp_name}")
+                    r2.markdown(f"**Date:** {log_date}")
+                    r3.markdown(f"**Type:** {etype}")
+                    r4.markdown(f"**Reference:** {ref_label}")
+                    r1.markdown(f"**Start:** {str(log.get('start_time',''))[:5]}")
+                    r2.markdown(f"**End:** {str(log.get('end_time',''))[:5]}")
+                    r3.markdown(f"**Hours:** {hours:.2f}h")
+                    if comment:
+                        st.markdown(f"**Comment:** {comment}")
+
+                    adm_cmt = st.text_input(
+                        "Admin comment (required when returning)",
+                        key=f"h_cmt_{log_id}",
+                        placeholder="Explain if returning…"
+                    )
+                    hc1, hc2, _ = st.columns([1,1,4])
+                    with hc1:
+                        if st.button("✅ Approve", key=f"h_app_{log_id}",
+                                     type="primary", use_container_width=True):
+                            try:
+                                db().table("work_logs").update({
+                                    "status":        "approved",
+                                    "approved_by":   admin_uname,
+                                    "admin_comment": adm_cmt,
+                                    "approved_at":   datetime.now(timezone.utc).isoformat(),
+                                    "updated_at":    datetime.now(timezone.utc).isoformat(),
+                                }).eq("id", log_id).execute()
+                                st.success("Approved!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                    with hc2:
+                        if st.button("↩️ Return", key=f"h_ret_{log_id}",
+                                     use_container_width=True):
+                            if not adm_cmt.strip():
+                                st.warning("Please add a comment explaining the return.")
+                            else:
+                                try:
+                                    db().table("work_logs").update({
+                                        "status":        "returned",
+                                        "approved_by":   admin_uname,
+                                        "admin_comment": adm_cmt,
+                                        "approved_at":   datetime.now(timezone.utc).isoformat(),
+                                        "updated_at":    datetime.now(timezone.utc).isoformat(),
+                                    }).eq("id", log_id).execute()
+                                    st.warning("Returned.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Approved Users (manage access)
