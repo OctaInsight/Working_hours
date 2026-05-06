@@ -240,8 +240,11 @@ def sidebar_nav():
         if st.button("🏠  Home",                  key="nav_home",  use_container_width=True): st.switch_page("pages/dashboard.py")
         if st.button("📊  Overall Working Hours", key="nav_dash",  use_container_width=True): st.switch_page("pages/dashboard.py")
         if st.button("➕  Add Working Hours",     key="nav_add",   use_container_width=True): st.switch_page("pages/add_hours.py")
-        if st.button("📌  Assign Task",             key="nav_assign", use_container_width=True): st.switch_page("pages/assign_task.py")
-        if st.button("✅  My Tasks",                key="nav_tasks",  use_container_width=True): st.switch_page("pages/my_tasks.py")
+
+        st.markdown("<hr style='border:none;border-top:1px solid rgba(255,255,255,0.12);margin:0.5rem 0'>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:0.68rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:{DARK["muted"]};margin-bottom:0.3rem'>Tasks</div>", unsafe_allow_html=True)
+        if st.button("📌  Assign Task", key="nav_assign", use_container_width=True): st.switch_page("pages/assign_task.py")
+        if st.button("✅  My Tasks",    key="nav_tasks",  use_container_width=True): st.switch_page("pages/my_tasks.py")
 
         # Admin
         if is_admin_user:
