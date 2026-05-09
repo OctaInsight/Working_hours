@@ -145,7 +145,7 @@ def login_user(email: str, password: str) -> tuple:
     return True, f"Welcome back, {name}!", user
 
 
-def _update_last_login(user_id: int):
+def _update_last_login(user_id: int):  # also exported
     try:
         db().table("octa_users") \
             .update({"last_login": datetime.now(timezone.utc).isoformat()}) \
@@ -239,9 +239,20 @@ def is_authenticated() -> bool:
 
 
 def require_auth():
-    """Redirect to login if not authenticated."""
-    if not is_authenticated():
-        st.switch_page("pages/login.py")
+    """
+    Check authentication. Tries URL token (SSO) first, then session state.
+    Redirects to login if neither is valid.
+    """
+    if is_authenticated():
+        return
+    # Try SSO token from URL
+    try:
+        from modules.sso import auto_login_from_url
+        if auto_login_from_url():
+            return
+    except ImportError:
+        pass  # sso module not present in this app yet
+    st.switch_page("pages/login.py")
 
 
 def is_admin() -> bool:
