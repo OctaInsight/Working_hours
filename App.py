@@ -4,7 +4,7 @@ Octa Working Hours — Main Entry Point
 import streamlit as st
 from config import APP_NAME, APP_ICON, DARK
 from modules.ui_helpers import inject_css, sidebar_nav
-from modules.auth import is_authenticated, clear_session, is_admin
+from modules.auth import is_authenticated, clear_session, is_admin, require_auth
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -13,10 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 inject_css()
-
-if not is_authenticated():
-    st.switch_page("pages/login.py")
-
+require_auth()   # checks SSO token from URL first, then session
 sidebar_nav()
 
 # ── Welcome hero ──────────────────────────────────────────────────────────────
