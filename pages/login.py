@@ -85,8 +85,17 @@ with tab_login:
             ok, msg, user = login_user(li_email, li_pass)
             if ok:
                 set_session(user)
+                # Create SSO token so session survives refresh
+                try:
+                    from modules.sso import create_session_token, set_token_in_url
+                    token = create_session_token(user["id"])
+                    if token:
+                        st.session_state["sso_token"] = token
+                        set_token_in_url(token)
+                except ImportError:
+                    pass
                 if needs_password_change():
-                    st.rerun()   # will hit the force-change screen above
+                    st.rerun()
                 else:
                     st.switch_page("pages/dashboard.py")
             else:
